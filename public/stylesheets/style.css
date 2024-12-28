@@ -1,0 +1,110 @@
+/* ========== 大枠スタイル ========== */
+body {
+  font-family: sans-serif;
+  margin: 16px;
+}
+h1 {
+  margin-bottom: 8px;
+}
+
+/* ========== 入力欄まわり ========== */
+.username-section {
+  margin-bottom: 16px;
+}
+
+/* ========== ボタン類 ========== */
+.check-button {
+  background: #4CAF50; /* 緑 */
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  margin-right: 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.check-button:hover {
+  opacity: 0.9;
+}
+
+/* NGボタン */
+.check-button-ng {
+  background-color: #f44336; /* 赤 */
+}
+.check-button-ng:hover {
+  opacity: 0.9;
+}
+
+/* フィルタボタン */
+.filter-container {
+  margin-bottom: 8px;
+}
+.filter-button {
+  background: #008CBA;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  margin-right: 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.filter-button:hover {
+  opacity: 0.9;
+}
+.filter-count {
+  margin-left: 12px;
+  font-weight: bold;
+  color: #555;
+}
+
+/* ========== JSONデータ項目表示 ========== */
+.item-container {
+  border: 1px solid #ccc;
+  padding: 12px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+}
+.text-area {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+/* ---- 文字列ハイライト ---- */
+.formal-found {
+  background-color: rgba(255, 0, 0, 0.1);  /* 正式名称(ヒット)背景色 */
+  font-weight: bold;
+}
+.formal-missing {
+  background-color: rgba(255, 0, 0, 0.3);  /* 正式名称(未ヒット)背景色 */
+  font-weight: bold;
+}
+.abbr-found {
+  background-color: rgba(0, 0, 255, 0.1);  /* 略称(ヒット)背景色 */
+  font-weight: bold;
+}
+.abbr-missing {
+  background-color: rgba(0, 0, 255, 0.3);  /* 略称(未ヒット)背景色 */
+  font-weight: bold;
+}
+
+/* ---- ボタンコンテナ ---- */
+.button-container {
+  margin: 8px 0;
+}
+
+/* ---- NG時の修正フィールド ---- */
+.hidden {
+  display: none;
+}
+.correction-field {
+  margin-top: 8px;
+}
+.correction-field label {
+  display: inline-block;
+  width: 80px;
+}
+.correction-field input {
+  width: 80%;
+  margin-bottom: 4px;
+}
