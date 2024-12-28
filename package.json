@@ -1,0 +1,12 @@
+{
+  "name": "json-formal-abbr-checker",
+  "version": "1.0.0",
+  "description": "法律などの正式名称と略称をチェックするツール",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  }
+}
