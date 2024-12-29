@@ -6,9 +6,17 @@
  * - 各項目に「メモ欄」を追加し、その内容もJSONに保存
  *   (古いバージョンのJSONで memoキーが無い場合は新たに追加)
  ************************************************************/
+/************************************************************
+ * main.js (フロントエンド) - アップデート版
+ * - 新しいキー形式 "{file}_{i}" (i は choise_rand.json のトップレベル配列インデックス)
+ * - 旧キー "{file}_{listIndex}" で保存されたデータとの整合を取る(マイグレーション)
+ *   ただし最初に見つかった旧キーのみコピーし、それ以降の同キー上書きはしない
+ * - 未チェック / チェック済み / 全て / NG / 備考付き 表示切り替え
+ * - 各項目に「メモ欄」を追加し、その内容もJSONに保存
+ ************************************************************/
 
 let originalData = [];          // /api/data の生データ(choise_rand.json)
-let currentUserAnswers = {};    // /api/answers?userName=xxx で取得した回答
+let currentUserAnswers = {};    // /api/answers?userName=xxx で取得した回答 (旧キー→新キーへ変換後)
 let currentUserName = "";       // 現在表示中のユーザー名
 
 /**
@@ -18,8 +26,8 @@ async function fetchOriginalData() {
     try {
         const res = await fetch('/api/data');
         if (!res.ok) {
-            // throw new Error('Failed to fetch /api/data');
             console.error('Failed to fetch /api/data');
+            return [];
         }
         return await res.json();
     } catch (err) {
@@ -30,24 +38,19 @@ async function fetchOriginalData() {
 
 /**
  * /api/answers?userName=xxx を取得 (チェック結果読み込み)
+ * 古いキー "{file}_{listIndex}" を 新しいキー "{file}_{topIndex}" へマイグレーション
  */
 async function fetchUserAnswers(userName) {
     try {
         const res = await fetch(`/api/answers?userName=${encodeURIComponent(userName)}`);
         if (!res.ok) {
-            // throw new Error('Failed to fetch /api/answers');
             console.error('Failed to fetch /api/answers');
+            return {};
         }
-        const answers = await res.json();
+        const oldAnswers = await res.json();
 
-        // 古いバージョンの JSON では memo キーが存在しない場合があるため、
-        // ここで必要なら全 itemKey について memo キーを付与しておく。
-        for (const key of Object.keys(answers)) {
-            if (!('memo' in answers[key])) {
-                answers[key].memo = '';
-            }
-        }
-        return answers;
+        // 旧キーを新キーへ変換
+        return migrateAnswersToNewKeys(oldAnswers, originalData);
     } catch (err) {
         console.error(err);
         return {};
@@ -57,7 +60,7 @@ async function fetchUserAnswers(userName) {
 /**
  * /api/answers?userName=xxx に回答をPOSTしてサーバー側を上書き
  * param answersObj = {
- *   "file_listIndex": { judgement: "OK" or "NG", correctFormal: ..., correctAbbr: ..., memo: ..., timestamp: ... },
+ *   "file_i": { judgement: "OK" or "NG", correctFormal: ..., correctAbbr: ..., memo: ..., timestamp: ... },
  *   ...
  * }
  */
@@ -69,8 +72,8 @@ async function postUserAnswers(userName, answersObj) {
             body: JSON.stringify(answersObj)
         });
         if (!res.ok) {
-            // throw new Error('Failed to POST /api/answers');
             console.error('Failed to POST /api/answers');
+            return {success: false};
         }
         return await res.json();
     } catch (err) {
@@ -80,48 +83,88 @@ async function postUserAnswers(userName, answersObj) {
 }
 
 /**
- * originalData から "list" を1つの配列に統合しやすい形で抜き出す
+ * 旧キー "{file}_{listIndex}" → 新キー "{file}_{i}"
+ * originalData のトップレベル配列を参照し、古い回答データを新形式にマッピング
+ *
+ * １）同じ新キーに複数の旧キーが該当しても、
+ *    **最初に見つかった旧キーのみコピー** し、それ以降は上書きしない。
+ */
+function migrateAnswersToNewKeys(oldAnswers, originalData) {
+    const newAnswers = {};
+
+    // originalData の各要素 i に対して
+    originalData.forEach((entry, i) => {
+        const fileName = entry.file;
+
+        // もし list があるなら、旧システムでは "listIndex" 分 {file}_{0} ... {file}_{n} が存在した
+        if (Array.isArray(entry.list) && entry.list.length > 0) {
+            entry.list.forEach((_, j) => {
+                const oldKey = `${fileName}_${j}`;  // 旧キー
+                const newKey = `${fileName}_${i}`;  // 新キー
+                if (oldAnswers[oldKey]) {
+                    // まだ newKey 未設定の場合のみコピー (最初のヒットを優先)
+                    if (!(newKey in newAnswers)) {
+                        newAnswers[newKey] = oldAnswers[oldKey];
+                    }
+                }
+            });
+        } else {
+            // list が無い場合は {file}_0 が旧キーの可能性あり
+            const oldKey = `${fileName}_0`;
+            const newKey = `${fileName}_${i}`;
+            if (oldAnswers[oldKey]) {
+                if (!(newKey in newAnswers)) {
+                    newAnswers[newKey] = oldAnswers[oldKey];
+                }
+            }
+        }
+    });
+
+    // memo キーが無い場合は空文字で初期化しておく
+    for (const key of Object.keys(newAnswers)) {
+        if (!('memo' in newAnswers[key])) {
+            newAnswers[key].memo = '';
+        }
+    }
+
+    return newAnswers;
+}
+
+/**
+ * originalData から "list" をまとめる際、
+ *  - トップレベルのインデックス i を保持 (topIndex)
+ *  - ここでは list の先頭要素のみを参照 (必要に応じて拡張)
  * return:
  * [
  *   {
- *     file: "...",
+ *     file: "xxxx",
  *     text: "...",
  *     formal: "...",
  *     abbr: "...",
- *     listIndex: 0,
- *     lawName: "..."
+ *     lawName: "...",
+ *     topIndex: i
  *   },
  *   ...
  * ]
  */
 function gatherAllListItems(data) {
     const result = [];
-    data.forEach((item) => {
-        if (Array.isArray(item.list) && item.list.length > 0) {
-            item.list.forEach((listObj, idx) => {
-                result.push({
-                    file: item.file,
-                    text: item.text,
-                    formal: listObj.formal,
-                    abbr: listObj.abbr,
-                    listIndex: idx,
-                    lawName: item.article_index?.law_name || ''
-                });
-            });
-        }
+    data.forEach((item, i) => {
+        const firstList = (item.list && item.list[0]) ? item.list[0] : null;
+        result.push({
+            file: item.file,
+            text: item.text,
+            formal: firstList ? firstList.formal : '',
+            abbr: firstList ? firstList.abbr : '',
+            lawName: item.article_index?.law_name || '',
+            topIndex: i // 新キーで使う
+        });
     });
     return result;
 }
 
 /**
  * 指定した substring が出現する箇所を全てハイライトするヘルパー関数。
- * @param {string} text - 変更対象のテキスト
- * @param {string} needle - 検索文字列
- * @param {string} startTag - ハイライト開始タグ (例: '<span class="abbr-found">')
- * @param {string} endTag - ハイライト終了タグ (例: '</span>')
- * @returns {object} { text: string, found: boolean }
- *   - text: ハイライト済み文字列
- *   - found: 1回以上見つかった場合は true、見つからなかった場合は false
  */
 function highlightAllOccurrences(text, needle, startTag, endTag) {
     let result = '';
@@ -131,16 +174,12 @@ function highlightAllOccurrences(text, needle, startTag, endTag) {
     while (true) {
         const foundIndex = text.indexOf(needle, fromIndex);
         if (foundIndex === -1) {
-            // 見つからなかった → 残りをまとめて result に入れてループ終了
             result += text.slice(fromIndex);
             break;
         }
-        // needle が見つかった箇所までをコピー
         result += text.slice(fromIndex, foundIndex);
-        // needle 部分をハイライト
         result += startTag + needle + endTag;
         foundAny = true;
-        // 次の検索開始位置を更新
         fromIndex = foundIndex + needle.length;
     }
 
@@ -155,7 +194,7 @@ function highlightAllOccurrences(text, needle, startTag, endTag) {
 function highlightText(baseText, formal, abbr) {
     let highlighted = baseText;
 
-    // 1) 正式名称の全 occurrences をハイライト
+    // 正式名称
     const formalResult = highlightAllOccurrences(
         highlighted,
         formal,
@@ -167,7 +206,7 @@ function highlightText(baseText, formal, abbr) {
         highlighted += `<br/><span class="formal-missing">【未ヒット：${formal}】</span>`;
     }
 
-    // 2) 略称の全 occurrences をハイライト
+    // 略称
     const abbrResult = highlightAllOccurrences(
         highlighted,
         abbr,
@@ -184,11 +223,8 @@ function highlightText(baseText, formal, abbr) {
 
 /**
  * 「トースト風」通知を表示するヘルパー関数
- * @param {string} message - 表示するメッセージ(改行は \n で指定可能)
- * @param {number} duration - 表示時間ミリ秒 (デフォルト3秒)
  */
 function showToast(message, duration = 3000) {
-    // 1. トースト用のコンテナ要素が無ければ作る
     let toastContainer = document.getElementById('toast-container');
     if (!toastContainer) {
         toastContainer = document.createElement('div');
@@ -200,9 +236,7 @@ function showToast(message, duration = 3000) {
         document.body.appendChild(toastContainer);
     }
 
-    // 2. トースト要素を作って追加
     const toast = document.createElement('div');
-    // \n を <br> に置き換えて innerHTML に設定する
     toast.innerHTML = message.replace(/\n/g, '<br/>');
 
     toast.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
@@ -215,17 +249,16 @@ function showToast(message, duration = 3000) {
 
     toastContainer.appendChild(toast);
 
-    // 3. 一定時間経過後に削除
     setTimeout(() => {
         toast.style.opacity = '0';
         setTimeout(() => {
             toast.remove();
-        }, 300); // フェードアウト完了後に削除
+        }, 300);
     }, duration);
 }
 
 /**
- * 1件のリスト項目を HTML要素化する
+ * 1件のリスト項目を HTML要素化する (新キー形式)
  */
 function createListItemElement(itemData) {
     const container = document.createElement('div');
@@ -263,14 +296,12 @@ function createListItemElement(itemData) {
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'button-container';
 
-    // OKボタン (緑)
     const okButton = document.createElement('button');
-    okButton.className = 'check-button';  // もともと CSS で緑色 (例: #4CAF50)
+    okButton.className = 'check-button';  // CSS で緑色
     okButton.textContent = 'OK';
 
-    // NGボタン (赤)
     const ngButton = document.createElement('button');
-    ngButton.className = 'check-button check-button-ng'; // もともと CSS で赤色 (例: #f44336)
+    ngButton.className = 'check-button check-button-ng'; // CSS で赤色
     ngButton.textContent = 'NG';
 
     buttonContainer.appendChild(okButton);
@@ -292,7 +323,7 @@ function createListItemElement(itemData) {
   `;
     container.appendChild(correctionDiv);
 
-    // ----- 備考メモ欄を追加 -----
+    // 備考メモ欄
     const memoDiv = document.createElement('div');
     memoDiv.className = 'memo-field';
     memoDiv.style.marginTop = '6px';
@@ -301,19 +332,18 @@ function createListItemElement(itemData) {
     <textarea class="memo-input" rows="2" style="width:98%;"></textarea>
   `;
     container.appendChild(memoDiv);
+
     const memoInput = memoDiv.querySelector('.memo-input');
 
-    // 既存回答があれば反映
-    const itemKey = `${itemData.file}_${itemData.listIndex}`;
+    // 新しいキー "{file}_{topIndex}" で回答を参照
+    const itemKey = `${itemData.file}_${itemData.topIndex}`;
     const existing = currentUserAnswers[itemKey];
     if (existing) {
         // judgement
         if (existing.judgement === 'OK') {
-            // OK: OKボタンを濃灰, NGを薄灰
             okButton.style.backgroundColor = '#555';
             ngButton.style.backgroundColor = '#ccc';
         } else if (existing.judgement === 'NG') {
-            // NG: NGボタンを濃灰, OKを薄灰
             ngButton.style.backgroundColor = '#555';
             okButton.style.backgroundColor = '#ccc';
 
@@ -321,15 +351,14 @@ function createListItemElement(itemData) {
             correctionDiv.querySelector('.correct-formal').value = existing.correctFormal || '';
             correctionDiv.querySelector('.correct-abbr').value = existing.correctAbbr || '';
         }
-        if (!('memo' in existing)) {
-            existing.memo = '';
-        }
-        memoInput.value = existing.memo;
+        // memo
+        memoInput.value = existing.memo || '';
     }
 
-    // --------- OKボタン押下 ---------
+    // ----------------- OKボタン押下 -----------------
     okButton.addEventListener('click', async () => {
         const timestamp = new Date().toISOString();
+        // 既存の回答を取得 or 初期化
         const baseData = currentUserAnswers[itemKey] || {};
         baseData.judgement = 'OK';
         baseData.correctFormal = '';
@@ -342,30 +371,28 @@ function createListItemElement(itemData) {
         const newData = {[itemKey]: baseData};
         const result = await postUserAnswers(currentUserName, newData);
         if (result.success) {
-            // ボタン色の変更
-            okButton.style.backgroundColor = '#555';  // pressed: 濃灰
-            ngButton.style.backgroundColor = '#ccc';  // not pressed: 薄灰
+            // ボタン色
+            okButton.style.backgroundColor = '#555';
+            ngButton.style.backgroundColor = '#ccc';
             correctionDiv.classList.add('hidden');
 
-            // ローカルの状態更新
+            // ローカル更新
             currentUserAnswers[itemKey] = newData[itemKey];
 
-            //トーストメッセージには，条文タイトルも表示
+            // トースト
             showToast(`OKを保存しました: \n${itemData.lawName}`, 3000);
         }
     });
 
-    // --------- NGボタン押下 ---------
+    // ----------------- NGボタン押下 -----------------
     ngButton.addEventListener('click', () => {
-        // ボタン色の変更 (NGを濃灰, OKを薄灰)
         ngButton.style.backgroundColor = '#555';
         okButton.style.backgroundColor = '#ccc';
 
-        // 修正フォームを表示
         correctionDiv.classList.remove('hidden');
     });
 
-    // --------- 修正フィールド変更 → サーバー保存 ---------
+    // ----------------- 修正フィールド change -----------------
     const formalInput = correctionDiv.querySelector('.correct-formal');
     const abbrInput = correctionDiv.querySelector('.correct-abbr');
     [formalInput, abbrInput].forEach(el => {
@@ -383,10 +410,7 @@ function createListItemElement(itemData) {
             const newData = {[itemKey]: baseData};
             const result = await postUserAnswers(currentUserName, newData);
             if (result.success) {
-                // ローカル側の状態更新
                 currentUserAnswers[itemKey] = newData[itemKey];
-
-                // 右下に「修正がサーバーに保存されました」通知
                 showToast(
                     `修正を保存しました: ${itemData.lawName}\n正式名称: ${formalInput.value}\n略称: ${abbrInput.value}`,
                     3000
@@ -395,7 +419,7 @@ function createListItemElement(itemData) {
         });
     });
 
-    // --------- メモ欄の更新 → サーバー保存 ---------
+    // ----------------- メモ欄 change -----------------
     memoInput.addEventListener('change', async () => {
         const baseData = currentUserAnswers[itemKey] || {};
         if (!('memo' in baseData)) {
@@ -416,48 +440,37 @@ function createListItemElement(itemData) {
 }
 
 /**
- * 指定したフィルタ(未チェック/チェック済み/全て/NG/メモ付き)で表示
+ * 指定したフィルタで表示
  * filterType = "unchecked" | "checked" | "all" | "ng" | "memo"
  */
 function renderAllItems(filterType) {
     const container = document.getElementById('itemsContainer');
     container.innerHTML = '';
 
-    // 全 listItem をまとめる
+    // 新しく gatherAllListItems で topIndex を取得
     const allListItems = gatherAllListItems(originalData);
 
-    // フィルタリング
+    // フィルタ
     const filtered = allListItems.filter(item => {
-        const key = `${item.file}_${item.listIndex}`;
+        const key = `${item.file}_${item.topIndex}`;
         const ans = currentUserAnswers[key];
 
         if (filterType === 'all') {
-            // 全て
             return true;
-
         } else if (filterType === 'unchecked') {
-            // judgement が未定義
             return !ans || !ans.judgement;
-
         } else if (filterType === 'checked') {
-            // judgement==='OK' または 'NG'
             return ans && (ans.judgement === 'OK' || ans.judgement === 'NG');
-
         } else if (filterType === 'ng') {
-            // judgement==='NG'
             return ans && ans.judgement === 'NG';
-
         } else if (filterType === 'memo') {
-            // memo が空でない
             return ans && ans.memo && ans.memo.trim() !== '';
-
-        } else {
-            return false;
         }
+        return false;
     });
 
-    // DOM 生成
-    filtered.forEach((item) => {
+    // DOM
+    filtered.forEach(item => {
         const el = createListItemElement(item);
         container.appendChild(el);
     });
@@ -479,24 +492,22 @@ function renderAllItems(filterType) {
     filterCount.textContent = `${label}：${filtered.length} 件`;
 }
 
-// ------------------- イベントリスナ -------------------
+// イベントリスナ
 window.addEventListener('DOMContentLoaded', () => {
     const usernameInput = document.getElementById('username');
     const loadBtn = document.getElementById('loadUserData');
     const btnShowUnchecked = document.getElementById('btnShowUnchecked');
     const btnShowChecked = document.getElementById('btnShowChecked');
     const btnShowAll = document.getElementById('btnShowAll');
-
-    // ------- 追加: NGを表示, 備考付き表示 ボタン -------
     const btnShowNg = document.getElementById('btnShowNg');
     const btnShowMemo = document.getElementById('btnShowMemo');
 
-    // まずサーバーから choise_rand.json を取得しておく
+    // 1) 最初に choise_rand.json を取得
     fetchOriginalData().then(data => {
-        originalData = data; // グローバル変数に保持
+        originalData = data;
     });
 
-    // 「読み込み」ボタン
+    // 2) 「読み込み」ボタン押下
     loadBtn.addEventListener('click', async () => {
         const userName = usernameInput.value.trim();
         if (!userName) {
@@ -505,14 +516,14 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         currentUserName = userName;
 
-        // サーバーから回答をGET
+        // サーバーから回答をGET (旧→新キーへマイグレ済み)
         currentUserAnswers = await fetchUserAnswers(userName);
 
-        // 最初は「全て」表示
+        // デフォルトは「全て」
         renderAllItems('all');
     });
 
-    // 未チェックを表示
+    // 未チェック
     btnShowUnchecked.addEventListener('click', () => {
         if (!currentUserName) {
             alert('先にユーザー名を入力して読み込んでください。');
@@ -521,7 +532,7 @@ window.addEventListener('DOMContentLoaded', () => {
         renderAllItems('unchecked');
     });
 
-    // チェック済みを表示
+    // チェック済み
     btnShowChecked.addEventListener('click', () => {
         if (!currentUserName) {
             alert('先にユーザー名を入力して読み込んでください。');
@@ -530,7 +541,7 @@ window.addEventListener('DOMContentLoaded', () => {
         renderAllItems('checked');
     });
 
-    // 全てを表示
+    // 全て
     btnShowAll.addEventListener('click', () => {
         if (!currentUserName) {
             alert('先にユーザー名を入力して読み込んでください。');
@@ -539,7 +550,7 @@ window.addEventListener('DOMContentLoaded', () => {
         renderAllItems('all');
     });
 
-    // -------- NGを表示 ボタン --------
+    // NGを表示
     btnShowNg.addEventListener('click', () => {
         if (!currentUserName) {
             alert('先にユーザー名を入力して読み込んでください。');
@@ -548,7 +559,7 @@ window.addEventListener('DOMContentLoaded', () => {
         renderAllItems('ng');
     });
 
-    // -------- 備考付き表示 ボタン --------
+    // 備考付きを表示
     btnShowMemo.addEventListener('click', () => {
         if (!currentUserName) {
             alert('先にユーザー名を入力して読み込んでください。');

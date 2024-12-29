@@ -16,7 +16,7 @@ Thumbs.db
 *.log
 
 # ユーザーがサーバー上で生成する回答ファイル等
-json/answer/*.json
+json/answer/*
 
 # dist/やbuild/などビルド成果物 (必要に応じて)
 dist/
