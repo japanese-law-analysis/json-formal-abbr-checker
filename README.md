@@ -19,7 +19,7 @@
 
 ## 動作環境
 
-- Node.js (推奨バージョン: 14 以上)
+- Node.js
 - npm または yarn などのパッケージマネージャ
 
 ## セットアップ
@@ -27,7 +27,7 @@
 1. リポジトリをクローンまたはダウンロードします。
 
    ````bash
-   git clone https://github.com/your-username/json-formal-abbr-checker.git
+   git clone git@github.com:japanese-law-analysis/json-formal-abbr-checker.git
    cd json-formal-abbr-checker
    ````
 
