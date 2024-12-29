@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>JSON 略称チェックツール</title>
-  <!-- CSS読み込み -->
-  <link rel="stylesheet" href="stylesheets/style.css" />
+    <meta charset="UTF-8"/>
+    <title>JSON 略称チェックツール</title>
+    <!-- CSS読み込み -->
+    <link rel="stylesheet" href="stylesheets/style.css"/>
 </head>
 <body>
 
@@ -12,22 +12,25 @@
 
 <!-- ユーザー名入力欄 -->
 <div class="username-section">
-  <label for="username">ユーザー名:</label>
-  <input type="text" id="username" placeholder="例) Taro" />
-  <button id="loadUserData" class="check-button">読み込み</button>
-  <span style="margin-left:12px; font-size:0.9em; color:#555;">
+    <label for="username">ユーザー名:</label>
+    <input type="text" id="username" placeholder="例) Taro"/>
+    <button id="loadUserData" class="check-button">読み込み</button>
+    <span style="margin-left:12px; font-size:0.9em; color:#555;">
       ※読み込みを押すとサーバーから法令データと回答データを取得します
     </span>
 </div>
 
 <!-- フィルタボタン -->
 <div class="filter-container">
-  <button id="btnShowUnchecked" class="filter-button">未チェックを表示</button>
-  <button id="btnShowChecked" class="filter-button">チェック済みを表示</button>
-  <button id="btnShowAll" class="filter-button">全てを表示</button>
-  <span id="filterCount" class="filter-count"></span>
-</div>
+    <button id="btnShowUnchecked" class="filter-button">未チェックを表示</button>
+    <button id="btnShowChecked" class="filter-button">チェック済みを表示</button>
+    <button id="btnShowAll" class="filter-button">全てを表示</button>
+    <!-- ここに追加: NG を表示 / 備考付き を表示 -->
+    <button id="btnShowNg" class="filter-button">NGを表示</button>
+    <button id="btnShowMemo" class="filter-button">備考付き表示</button>
 
+    <span id="filterCount" class="filter-count"></span>
+</div>
 <!-- JSON 項目を表示するコンテナ -->
 <div id="itemsContainer"></div>
 
