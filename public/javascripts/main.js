@@ -47,10 +47,10 @@ async function fetchUserAnswers(userName) {
             console.error('Failed to fetch /api/answers');
             return {};
         }
-        const oldAnswers = await res.json();
+        const Answers = await res.json();
 
         // 旧キーを新キーへ変換
-        return migrateAnswersToNewKeys(oldAnswers, originalData);
+        return Answers;
     } catch (err) {
         console.error(err);
         return {};
@@ -82,53 +82,6 @@ async function postUserAnswers(userName, answersObj) {
     }
 }
 
-/**
- * 旧キー "{file}_{listIndex}" → 新キー "{file}_{i}"
- * originalData のトップレベル配列を参照し、古い回答データを新形式にマッピング
- *
- * １）同じ新キーに複数の旧キーが該当しても、
- *    **最初に見つかった旧キーのみコピー** し、それ以降は上書きしない。
- */
-function migrateAnswersToNewKeys(oldAnswers, originalData) {
-    const newAnswers = {};
-
-    // originalData の各要素 i に対して
-    originalData.forEach((entry, i) => {
-        const fileName = entry.file;
-
-        // もし list があるなら、旧システムでは "listIndex" 分 {file}_{0} ... {file}_{n} が存在した
-        if (Array.isArray(entry.list) && entry.list.length > 0) {
-            entry.list.forEach((_, j) => {
-                const oldKey = `${fileName}_${j}`;  // 旧キー
-                const newKey = `${fileName}_${i}`;  // 新キー
-                if (oldAnswers[oldKey]) {
-                    // まだ newKey 未設定の場合のみコピー (最初のヒットを優先)
-                    if (!(newKey in newAnswers)) {
-                        newAnswers[newKey] = oldAnswers[oldKey];
-                    }
-                }
-            });
-        } else {
-            // list が無い場合は {file}_0 が旧キーの可能性あり
-            const oldKey = `${fileName}_0`;
-            const newKey = `${fileName}_${i}`;
-            if (oldAnswers[oldKey]) {
-                if (!(newKey in newAnswers)) {
-                    newAnswers[newKey] = oldAnswers[oldKey];
-                }
-            }
-        }
-    });
-
-    // memo キーが無い場合は空文字で初期化しておく
-    for (const key of Object.keys(newAnswers)) {
-        if (!('memo' in newAnswers[key])) {
-            newAnswers[key].memo = '';
-        }
-    }
-
-    return newAnswers;
-}
 
 /**
  * originalData から "list" をまとめる際、
