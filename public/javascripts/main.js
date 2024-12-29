@@ -2,7 +2,7 @@
  * main.js (フロントエンド)
  * - サーバーから /api/data (json/choise_rand.json) を取得
  * - ユーザー名を指定して /api/answers をGET/POSTして回答を読み書き
- * - 未チェック / チェック済み / 全て 表示切り替え
+ * - 未チェック / チェック済み / 全て / NG / 備考付き 表示切り替え
  * - 各項目に「メモ欄」を追加し、その内容もJSONに保存
  *   (古いバージョンのJSONで memoキーが無い場合は新たに追加)
  ************************************************************/
@@ -42,10 +42,7 @@ async function fetchUserAnswers(userName) {
 
         // 古いバージョンの JSON では memo キーが存在しない場合があるため、
         // ここで必要なら全 itemKey について memo キーを付与しておく。
-        // (※ ただし動的に項目数が多いときは createListItemElement 内で都度補完でもOK)
         for (const key of Object.keys(answers)) {
-            // judgement, correctFormal, correctAbbr, timestamp等は存在するが
-            // memo キーが無い場合、空文字で初期化
             if (!('memo' in answers[key])) {
                 answers[key].memo = '';
             }
@@ -306,7 +303,7 @@ function createListItemElement(itemData) {
     container.appendChild(memoDiv);
     const memoInput = memoDiv.querySelector('.memo-input');
 
-    // 既存回答があれば反映 (古いJSONには 'memo' キーが無い可能性あるので空文字で対処)
+    // 既存回答があれば反映
     const itemKey = `${itemData.file}_${itemData.listIndex}`;
     const existing = currentUserAnswers[itemKey];
     if (existing) {
@@ -324,9 +321,8 @@ function createListItemElement(itemData) {
             correctionDiv.querySelector('.correct-formal').value = existing.correctFormal || '';
             correctionDiv.querySelector('.correct-abbr').value = existing.correctAbbr || '';
         }
-        // memo (無い場合は空文字)
         if (!('memo' in existing)) {
-            existing.memo = ''; // 古いJSONならここで空文字をセット
+            existing.memo = '';
         }
         memoInput.value = existing.memo;
     }
@@ -334,20 +330,16 @@ function createListItemElement(itemData) {
     // --------- OKボタン押下 ---------
     okButton.addEventListener('click', async () => {
         const timestamp = new Date().toISOString();
-
-        // サーバーへPOST(OKデータ)
-        // memo は既に currentUserAnswers にある値をそのまま詰める
         const baseData = currentUserAnswers[itemKey] || {};
-        // judgementやcorrectFormalなどを上書き
         baseData.judgement = 'OK';
         baseData.correctFormal = '';
         baseData.correctAbbr = '';
         baseData.timestamp = timestamp;
-        // memo は baseData.memo があれば維持、無ければ空文字
+        if (!('memo' in baseData)) {
+            baseData.memo = '';
+        }
 
-        const newData = {
-            [itemKey]: baseData
-        };
+        const newData = {[itemKey]: baseData};
         const result = await postUserAnswers(currentUserName, newData);
         if (result.success) {
             // ボタン色の変更
@@ -379,20 +371,16 @@ function createListItemElement(itemData) {
     [formalInput, abbrInput].forEach(el => {
         el.addEventListener('change', async () => {
             const timestamp = new Date().toISOString();
-            // 既存データを取得し、NGとして上書き
             const baseData = currentUserAnswers[itemKey] || {};
             baseData.judgement = 'NG';
             baseData.correctFormal = formalInput.value;
             baseData.correctAbbr = abbrInput.value;
             baseData.timestamp = timestamp;
-            // memo も維持
             if (!('memo' in baseData)) {
                 baseData.memo = '';
             }
 
-            const newData = {
-                [itemKey]: baseData
-            };
+            const newData = {[itemKey]: baseData};
             const result = await postUserAnswers(currentUserName, newData);
             if (result.success) {
                 // ローカル側の状態更新
@@ -410,22 +398,16 @@ function createListItemElement(itemData) {
     // --------- メモ欄の更新 → サーバー保存 ---------
     memoInput.addEventListener('change', async () => {
         const baseData = currentUserAnswers[itemKey] || {};
-        // まだ存在しない場合は空オブジェクトから始める
         if (!('memo' in baseData)) {
             baseData.memo = '';
         }
         baseData.memo = memoInput.value;
-        // judgement 等は既存の状態を保持したまま
-        // timestamp も更新しておく
         baseData.timestamp = new Date().toISOString();
 
-        const newData = {
-            [itemKey]: baseData
-        };
+        const newData = {[itemKey]: baseData};
         const result = await postUserAnswers(currentUserName, newData);
         if (result.success) {
             currentUserAnswers[itemKey] = newData[itemKey];
-            // メモ保存のトースト表示
             showToast('メモを保存しました', 2000);
         }
     });
@@ -434,8 +416,8 @@ function createListItemElement(itemData) {
 }
 
 /**
- * 指定したフィルタ(未チェック/チェック済み/全て)で表示
- * filterType = "unchecked" | "checked" | "all"
+ * 指定したフィルタ(未チェック/チェック済み/全て/NG/メモ付き)で表示
+ * filterType = "unchecked" | "checked" | "all" | "ng" | "memo"
  */
 function renderAllItems(filterType) {
     const container = document.getElementById('itemsContainer');
@@ -448,14 +430,29 @@ function renderAllItems(filterType) {
     const filtered = allListItems.filter(item => {
         const key = `${item.file}_${item.listIndex}`;
         const ans = currentUserAnswers[key];
+
         if (filterType === 'all') {
+            // 全て
             return true;
+
         } else if (filterType === 'unchecked') {
-            // judgement 未定義 → 未チェック
+            // judgement が未定義
             return !ans || !ans.judgement;
+
         } else if (filterType === 'checked') {
-            // judgement==='OK' or 'NG'
+            // judgement==='OK' または 'NG'
             return ans && (ans.judgement === 'OK' || ans.judgement === 'NG');
+
+        } else if (filterType === 'ng') {
+            // judgement==='NG'
+            return ans && ans.judgement === 'NG';
+
+        } else if (filterType === 'memo') {
+            // memo が空でない
+            return ans && ans.memo && ans.memo.trim() !== '';
+
+        } else {
+            return false;
         }
     });
 
@@ -474,6 +471,10 @@ function renderAllItems(filterType) {
         label = '未チェック';
     } else if (filterType === 'checked') {
         label = 'チェック済み';
+    } else if (filterType === 'ng') {
+        label = 'NG';
+    } else if (filterType === 'memo') {
+        label = '備考付き';
     }
     filterCount.textContent = `${label}：${filtered.length} 件`;
 }
@@ -485,6 +486,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnShowUnchecked = document.getElementById('btnShowUnchecked');
     const btnShowChecked = document.getElementById('btnShowChecked');
     const btnShowAll = document.getElementById('btnShowAll');
+
+    // ------- 追加: NGを表示, 備考付き表示 ボタン -------
+    const btnShowNg = document.getElementById('btnShowNg');
+    const btnShowMemo = document.getElementById('btnShowMemo');
 
     // まずサーバーから choise_rand.json を取得しておく
     fetchOriginalData().then(data => {
@@ -500,7 +505,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         currentUserName = userName;
 
-        // サーバーから回答をGET (古いバージョンならここでmemoキーを補完)
+        // サーバーから回答をGET
         currentUserAnswers = await fetchUserAnswers(userName);
 
         // 最初は「全て」表示
@@ -532,5 +537,23 @@ window.addEventListener('DOMContentLoaded', () => {
             return;
         }
         renderAllItems('all');
+    });
+
+    // -------- NGを表示 ボタン --------
+    btnShowNg.addEventListener('click', () => {
+        if (!currentUserName) {
+            alert('先にユーザー名を入力して読み込んでください。');
+            return;
+        }
+        renderAllItems('ng');
+    });
+
+    // -------- 備考付き表示 ボタン --------
+    btnShowMemo.addEventListener('click', () => {
+        if (!currentUserName) {
+            alert('先にユーザー名を入力して読み込んでください。');
+            return;
+        }
+        renderAllItems('memo');
     });
 });
