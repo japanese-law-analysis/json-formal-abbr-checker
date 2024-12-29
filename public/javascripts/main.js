@@ -3,6 +3,8 @@
  * - サーバーから /api/data (json/choise_rand.json) を取得
  * - ユーザー名を指定して /api/answers をGET/POSTして回答を読み書き
  * - 未チェック / チェック済み / 全て 表示切り替え
+ * - 各項目に「メモ欄」を追加し、その内容もJSONに保存
+ *   (古いバージョンのJSONで memoキーが無い場合は新たに追加)
  ************************************************************/
 
 let originalData = [];          // /api/data の生データ(choise_rand.json)
@@ -16,7 +18,8 @@ async function fetchOriginalData() {
     try {
         const res = await fetch('/api/data');
         if (!res.ok) {
-            throw new Error('Failed to fetch /api/data');
+            // throw new Error('Failed to fetch /api/data');
+            console.error('Failed to fetch /api/data');
         }
         return await res.json();
     } catch (err) {
@@ -32,9 +35,22 @@ async function fetchUserAnswers(userName) {
     try {
         const res = await fetch(`/api/answers?userName=${encodeURIComponent(userName)}`);
         if (!res.ok) {
-            throw new Error('Failed to fetch /api/answers');
+            // throw new Error('Failed to fetch /api/answers');
+            console.error('Failed to fetch /api/answers');
         }
-        return await res.json();
+        const answers = await res.json();
+
+        // 古いバージョンの JSON では memo キーが存在しない場合があるため、
+        // ここで必要なら全 itemKey について memo キーを付与しておく。
+        // (※ ただし動的に項目数が多いときは createListItemElement 内で都度補完でもOK)
+        for (const key of Object.keys(answers)) {
+            // judgement, correctFormal, correctAbbr, timestamp等は存在するが
+            // memo キーが無い場合、空文字で初期化
+            if (!('memo' in answers[key])) {
+                answers[key].memo = '';
+            }
+        }
+        return answers;
     } catch (err) {
         console.error(err);
         return {};
@@ -44,7 +60,7 @@ async function fetchUserAnswers(userName) {
 /**
  * /api/answers?userName=xxx に回答をPOSTしてサーバー側を上書き
  * param answersObj = {
- *   "file_listIndex": { judgement: "OK" or "NG", correctFormal: ..., correctAbbr: ..., timestamp: ... },
+ *   "file_listIndex": { judgement: "OK" or "NG", correctFormal: ..., correctAbbr: ..., memo: ..., timestamp: ... },
  *   ...
  * }
  */
@@ -56,7 +72,8 @@ async function postUserAnswers(userName, answersObj) {
             body: JSON.stringify(answersObj)
         });
         if (!res.ok) {
-            throw new Error('Failed to POST /api/answers');
+            // throw new Error('Failed to POST /api/answers');
+            console.error('Failed to POST /api/answers');
         }
         return await res.json();
     } catch (err) {
@@ -142,7 +159,6 @@ function highlightText(baseText, formal, abbr) {
     let highlighted = baseText;
 
     // 1) 正式名称の全 occurrences をハイライト
-    //    見つからなかった場合は「未ヒット」注釈を末尾に付ける
     const formalResult = highlightAllOccurrences(
         highlighted,
         formal,
@@ -155,7 +171,6 @@ function highlightText(baseText, formal, abbr) {
     }
 
     // 2) 略称の全 occurrences をハイライト
-    //    見つからなかった場合は「未ヒット」注釈を末尾に付ける
     const abbrResult = highlightAllOccurrences(
         highlighted,
         abbr,
@@ -191,8 +206,7 @@ function showToast(message, duration = 3000) {
     // 2. トースト要素を作って追加
     const toast = document.createElement('div');
     // \n を <br> に置き換えて innerHTML に設定する
-    const htmlMessage = message.replace(/\n/g, '<br/>');
-    toast.innerHTML = htmlMessage;
+    toast.innerHTML = message.replace(/\n/g, '<br/>');
 
     toast.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
     toast.style.color = 'white';
@@ -212,7 +226,6 @@ function showToast(message, duration = 3000) {
         }, 300); // フェードアウト完了後に削除
     }, duration);
 }
-
 
 /**
  * 1件のリスト項目を HTML要素化する
@@ -282,10 +295,22 @@ function createListItemElement(itemData) {
   `;
     container.appendChild(correctionDiv);
 
-    // 既存回答があれば反映
+    // ----- 備考メモ欄を追加 -----
+    const memoDiv = document.createElement('div');
+    memoDiv.className = 'memo-field';
+    memoDiv.style.marginTop = '6px';
+    memoDiv.innerHTML = `
+    <label style="display:block; margin-bottom:2px; font-weight:bold;">備考メモ:</label>
+    <textarea class="memo-input" rows="2" style="width:98%;"></textarea>
+  `;
+    container.appendChild(memoDiv);
+    const memoInput = memoDiv.querySelector('.memo-input');
+
+    // 既存回答があれば反映 (古いJSONには 'memo' キーが無い可能性あるので空文字で対処)
     const itemKey = `${itemData.file}_${itemData.listIndex}`;
     const existing = currentUserAnswers[itemKey];
     if (existing) {
+        // judgement
         if (existing.judgement === 'OK') {
             // OK: OKボタンを濃灰, NGを薄灰
             okButton.style.backgroundColor = '#555';
@@ -299,6 +324,11 @@ function createListItemElement(itemData) {
             correctionDiv.querySelector('.correct-formal').value = existing.correctFormal || '';
             correctionDiv.querySelector('.correct-abbr').value = existing.correctAbbr || '';
         }
+        // memo (無い場合は空文字)
+        if (!('memo' in existing)) {
+            existing.memo = ''; // 古いJSONならここで空文字をセット
+        }
+        memoInput.value = existing.memo;
     }
 
     // --------- OKボタン押下 ---------
@@ -306,20 +336,23 @@ function createListItemElement(itemData) {
         const timestamp = new Date().toISOString();
 
         // サーバーへPOST(OKデータ)
+        // memo は既に currentUserAnswers にある値をそのまま詰める
+        const baseData = currentUserAnswers[itemKey] || {};
+        // judgementやcorrectFormalなどを上書き
+        baseData.judgement = 'OK';
+        baseData.correctFormal = '';
+        baseData.correctAbbr = '';
+        baseData.timestamp = timestamp;
+        // memo は baseData.memo があれば維持、無ければ空文字
+
         const newData = {
-            [itemKey]: {
-                judgement: 'OK',
-                correctFormal: '',
-                correctAbbr: '',
-                timestamp
-            }
+            [itemKey]: baseData
         };
         const result = await postUserAnswers(currentUserName, newData);
         if (result.success) {
             // ボタン色の変更
             okButton.style.backgroundColor = '#555';  // pressed: 濃灰
             ngButton.style.backgroundColor = '#ccc';  // not pressed: 薄灰
-
             correctionDiv.classList.add('hidden');
 
             // ローカルの状態更新
@@ -346,13 +379,19 @@ function createListItemElement(itemData) {
     [formalInput, abbrInput].forEach(el => {
         el.addEventListener('change', async () => {
             const timestamp = new Date().toISOString();
+            // 既存データを取得し、NGとして上書き
+            const baseData = currentUserAnswers[itemKey] || {};
+            baseData.judgement = 'NG';
+            baseData.correctFormal = formalInput.value;
+            baseData.correctAbbr = abbrInput.value;
+            baseData.timestamp = timestamp;
+            // memo も維持
+            if (!('memo' in baseData)) {
+                baseData.memo = '';
+            }
+
             const newData = {
-                [itemKey]: {
-                    judgement: 'NG',
-                    correctFormal: formalInput.value,
-                    correctAbbr: abbrInput.value,
-                    timestamp
-                }
+                [itemKey]: baseData
             };
             const result = await postUserAnswers(currentUserName, newData);
             if (result.success) {
@@ -360,10 +399,35 @@ function createListItemElement(itemData) {
                 currentUserAnswers[itemKey] = newData[itemKey];
 
                 // 右下に「修正がサーバーに保存されました」通知
-                // トーストメッセージには，正式名称と略称も表示．途中で改行
-                showToast(`修正を保存しました: ${itemData.lawName}\n正式名称: ${formalInput.value}\n略称: ${abbrInput.value}`, 3000);
+                showToast(
+                    `修正を保存しました: ${itemData.lawName}\n正式名称: ${formalInput.value}\n略称: ${abbrInput.value}`,
+                    3000
+                );
             }
         });
+    });
+
+    // --------- メモ欄の更新 → サーバー保存 ---------
+    memoInput.addEventListener('change', async () => {
+        const baseData = currentUserAnswers[itemKey] || {};
+        // まだ存在しない場合は空オブジェクトから始める
+        if (!('memo' in baseData)) {
+            baseData.memo = '';
+        }
+        baseData.memo = memoInput.value;
+        // judgement 等は既存の状態を保持したまま
+        // timestamp も更新しておく
+        baseData.timestamp = new Date().toISOString();
+
+        const newData = {
+            [itemKey]: baseData
+        };
+        const result = await postUserAnswers(currentUserName, newData);
+        if (result.success) {
+            currentUserAnswers[itemKey] = newData[itemKey];
+            // メモ保存のトースト表示
+            showToast('メモを保存しました', 2000);
+        }
     });
 
     return container;
@@ -387,8 +451,10 @@ function renderAllItems(filterType) {
         if (filterType === 'all') {
             return true;
         } else if (filterType === 'unchecked') {
-            return !ans || !ans.judgement; // judgement 未定義 → 未チェック
+            // judgement 未定義 → 未チェック
+            return !ans || !ans.judgement;
         } else if (filterType === 'checked') {
+            // judgement==='OK' or 'NG'
             return ans && (ans.judgement === 'OK' || ans.judgement === 'NG');
         }
     });
@@ -434,9 +500,8 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         currentUserName = userName;
 
-        // サーバーから回答をGET
-        const answers = await fetchUserAnswers(userName);
-        currentUserAnswers = answers;
+        // サーバーから回答をGET (古いバージョンならここでmemoキーを補完)
+        currentUserAnswers = await fetchUserAnswers(userName);
 
         // 最初は「全て」表示
         renderAllItems('all');
